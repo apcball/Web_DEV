@@ -27,13 +27,32 @@ For demonstration purposes, the application includes sample stock data:
 - Smart Watch ($299, 15 in stock)
 - Tablet Air ($499, 30 in stock)
 
+## Excel Data Import
+
+To use the Excel import feature in a real application:
+
+1. Create an Excel file with the following columns:
+   - `sku`: Product SKU (optional)
+   - `name`: Product name
+   - `category`: Product category
+   - `price`: Product price
+   - `quantity`: Available quantity
+
+2. Save the file in .xlsx format
+
+3. In the admin panel, click "Choose Excel File" and select your file
+
+4. The system will automatically parse and import your stock data
+
+A sample template is available at `public/stock-template.csv` which can be opened in Excel or converted to XLSX format.
+
 ## Technical Details
 
 This application is built with:
 - React for the frontend
 - Vite for fast development
 - CSS for beautiful styling
-- xlsx library for Excel file parsing (in a real implementation)
+- xlsx library for Excel file parsing
 
 ## Installation
 
@@ -49,6 +68,14 @@ This application is built with:
 
 3. Open your browser to http://localhost:3000
 
-## Note on Excel Integration
+## Admin Access
 
-In this demo version, the Excel upload feature simulates the process. In a full implementation, it would parse actual Excel files using the xlsx library.
+To access the admin panel:
+1. Click "Admin View" in the navigation bar
+2. Enter password: `admin123`
+
+In the admin panel, you can:
+- Upload stock data from Excel files
+- View and manage reservations
+- Replenish stock quantities
+- View inventory summaries and charts

@@ -4,6 +4,8 @@ const AdminStockTable = ({ stockData, onDeductStock }) => {
   const [deductQuantities, setDeductQuantities] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Get unique categories for filter dropdown
   const categories = ['all', ...new Set(stockData.map(item => item.category))];
@@ -12,12 +14,35 @@ const AdminStockTable = ({ stockData, onDeductStock }) => {
   const filteredStockData = stockData.filter(item => {
     const matchesSearch = searchTerm === '' || 
       item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.category.toLowerCase().includes(searchTerm.toLowerCase());
+      item.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.sku && item.sku.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
     
     return matchesSearch && matchesCategory;
   });
+
+  // Pagination logic
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredStockData.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredStockData.length / itemsPerPage);
+
+  const handlePageChange = (pageNumber) => {
+    setCurrentPage(pageNumber);
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
 
   const handleQuantityChange = (productId, value) => {
     setDeductQuantities(prev => ({
@@ -36,13 +61,18 @@ const AdminStockTable = ({ stockData, onDeductStock }) => {
     }));
   };
 
+  // Reset pagination when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, categoryFilter]);
+
   return (
     <div className="admin-stock-management">
       <div className="admin-search-filters">
         <div className="admin-search-box">
           <input
             type="text"
-            placeholder="Search by product name or category..."
+            placeholder="Search by product name, SKU, or category..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="admin-search-input"
@@ -74,11 +104,37 @@ const AdminStockTable = ({ stockData, onDeductStock }) => {
         )}
       </div>
       
+      {/* Pagination Controls - Top */}
+      {totalPages > 1 && (
+        <div className="pagination-controls">
+          <button 
+            className="pagination-btn"
+            onClick={handlePrevPage}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </button>
+          
+          <span className="pagination-info">
+            Page {currentPage} of {totalPages} (Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, filteredStockData.length)} of {filteredStockData.length} products)
+          </span>
+          
+          <button 
+            className="pagination-btn"
+            onClick={handleNextPage}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
+      
       <div className="admin-stock-table-container">
         <table className="admin-stock-table">
           <thead>
             <tr>
               <th>Product Name</th>
+              <th>SKU</th>
               <th>Category</th>
               <th>Price (฿)</th>
               <th>Current Stock</th>
@@ -87,10 +143,11 @@ const AdminStockTable = ({ stockData, onDeductStock }) => {
             </tr>
           </thead>
           <tbody>
-            {filteredStockData.length > 0 ? (
-              filteredStockData.map((item) => (
+            {currentItems.length > 0 ? (
+              currentItems.map((item) => (
                 <tr key={item.id}>
                   <td data-label="Product">{item.name}</td>
+                  <td data-label="SKU">{item.sku}</td>
                   <td data-label="Category">
                     <span className="category-tag">{item.category}</span>
                   </td>
@@ -120,7 +177,7 @@ const AdminStockTable = ({ stockData, onDeductStock }) => {
               ))
             ) : (
               <tr>
-                <td colSpan="6" className="no-results">
+                <td colSpan="7" className="no-results">
                   No products found matching your search criteria
                 </td>
               </tr>

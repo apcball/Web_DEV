@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const ReservationModal = ({ stockData, reservations, onSubmit, onCancel }) => {
+const ReservationModal = ({ stockData, reservations, onSubmit, onCancel, selectedProduct }) => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [customerName, setCustomerName] = useState('');
   const [salesPerson, setSalesPerson] = useState('');
@@ -9,14 +9,20 @@ const ReservationModal = ({ stockData, reservations, onSubmit, onCancel }) => {
   const [discount, setDiscount] = useState(''); // Fixed discount amount as string to handle empty input
   const [vatEnabled, setVatEnabled] = useState(true); // VAT 7% enabled by default
 
-  // Initialize quantities for all products
+  // Initialize quantities for all products and auto-select passed product
   useEffect(() => {
     const initialQuantities = {};
     stockData.forEach(product => {
       initialQuantities[product.id] = 1;
     });
     setQuantities(initialQuantities);
-  }, [stockData]);
+    
+    // Auto-select the passed product if available
+    if (selectedProduct) {
+      setSelectedProducts([selectedProduct]);
+      // Set focus to the search input or scroll to the product
+    }
+  }, [stockData, selectedProduct]);
 
   // Calculate reserved quantities for each product
   const calculateReservedQuantities = () => {

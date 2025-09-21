@@ -1132,16 +1132,56 @@ body {
   box-shadow: 0 5px 15px rgba(67, 233, 123, 0.4);
 }
 
-@media (max-width: 768px) {
-  .group-summary {
-    flex-direction: column;
-    gap: 5px;
-  }
+/* Pagination Controls */
+.pagination-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  margin-top: 20px;
+  padding: 20px 0;
+  flex-wrap: wrap;
 }
 
-@media (max-width: 600px) {
-  .main-nav {
+.pagination-btn {
+  background: var(--primary-gradient);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1rem;
+  transition: var(--transition);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.pagination-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(102, 126, 234, 0.3);
+}
+
+.pagination-btn:disabled {
+  background: #cccccc;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.pagination-info {
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .pagination-controls {
+    gap: 10px;
     flex-direction: column;
-    align-items: stretch;
+  }
+  
+  .pagination-info {
+    text-align: center;
+    font-size: 0.9rem;
   }
 }
