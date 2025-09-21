@@ -14,22 +14,61 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
 
-  // Load sample data
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const API_URL = 'http://localhost:3002/api';
+
+  // Load data from API
   useEffect(() => {
-    const sampleData = [
-      { id: 1, sku: 'SM-X-001', name: 'Smartphone X', category: 'Electronics', price: 699, quantity: 25 },
-      { id: 2, sku: 'LP-PRO-002', name: 'Laptop Pro', category: 'Computers', price: 1299, quantity: 10 },
-      { id: 3, sku: 'WH-003', name: 'Wireless Headphones', category: 'Audio', price: 199, quantity: 40 },
-      { id: 4, sku: 'SW-004', name: 'Smart Watch', category: 'Wearables', price: 299, quantity: 15 },
-      { id: 5, sku: 'TA-005', name: 'Tablet Air', category: 'Electronics', price: 499, quantity: 30 },
-      { id: 6, sku: 'BS-006', name: 'Bluetooth Speaker', category: 'Audio', price: 129, quantity: 35 },
-      { id: 7, sku: 'GC-007', name: 'Gaming Console', category: 'Entertainment', price: 499, quantity: 8 },
-      { id: 8, sku: 'SSD-1TB-008', name: 'External SSD 1TB', category: 'Storage', price: 159, quantity: 22 },
-      { id: 9, sku: 'WK-009', name: 'Wireless Keyboard', category: 'Accessories', price: 79, quantity: 50 },
-      { id: 10, sku: 'MON-4K-010', name: '4K Monitor', category: 'Computers', price: 399, quantity: 12 },
-    ];
-    setStockData(sampleData);
-    setFilteredStockData(sampleData);
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [productsRes, reservationsRes] = await Promise.all([
+          fetch(`${API_URL}/products`),
+          fetch(`${API_URL}/reservations`)
+        ]);
+
+        if (!productsRes.ok || !reservationsRes.ok) {
+          throw new Error('Failed to fetch data');
+        }
+
+        const products = await productsRes.json();
+        const reservationsRaw = await reservationsRes.json();
+
+        // create sku->id map
+        const skuToId = {};
+        products.forEach(p => { skuToId[p.sku] = p.id; });
+
+        // Map backend reservation shape to frontend's shape
+        const reservationsMapped = reservationsRaw.map(r => ({
+          id: r.id,
+          productId: skuToId[r.product_sku] || null,
+          productSku: r.product_sku,
+          productName: r.product_name,
+          quantity: r.reserved_quantity,
+          customerName: r.customer_name,
+          date: r.created_at ? new Date(r.created_at).toLocaleDateString() : (r.date || ''),
+          status: r.status,
+          price: r.product_price || 0,
+          salesPerson: r.sales_person || r.salesPerson || '',
+          discount: r.discount || 0,
+          vat: r.vat || 0
+        }));
+
+        setStockData(products);
+        setFilteredStockData(products);
+        setReservations(reservationsMapped);
+        setError(null);
+      } catch (err) {
+        setError(err.message);
+        console.error("Fetch error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
   }, []);
 
   // Calculate reserved quantities for each product (only for pending reservations)
@@ -71,7 +110,7 @@ function App() {
     setFilteredStockData(filtered);
   }, [searchTerm, categoryFilter, stockData, reservations]);
 
-  const handleReservation = (newReservations) => {
+  const handleReservation = async (newReservations) => {
     // Validate each reservation
     for (const reservation of newReservations) {
       const product = stockData.find(item => item.id === reservation.productId);
@@ -94,17 +133,68 @@ function App() {
         return;
       }
     }
-    
-    // Add all reservations with proper IDs and dates
-    const updatedReservations = newReservations.map((reservation, index) => ({
-      ...reservation,
-      id: reservations.length + index + 1,
-      date: new Date().toLocaleDateString(),
-      status: 'pending'
-    }));
-    
-    setReservations([...reservations, ...updatedReservations]);
-    setIsReservationModalOpen(false);
+
+    try {
+      const created = [];
+      for (const r of newReservations) {
+        const product = stockData.find(p => p.id === r.productId);
+        const payload = {
+          product_sku: product ? product.sku : r.productSku,
+          customer_name: r.customerName,
+          reserved_quantity: r.quantity,
+          sales_person: r.salesPerson || '',
+          discount: r.discount || 0,
+          vat: r.vat || 0
+        };
+
+        const res = await fetch(`${API_URL}/reservations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to create reservation');
+        }
+
+        const data = await res.json();
+        created.push({ ...r, id: data.id, status: 'pending', date: new Date().toLocaleDateString(), productSku: payload.product_sku });
+      }
+
+      // refresh products and reservations from server to reflect updated stock
+      const [prodsRes, reservationsRes] = await Promise.all([
+        fetch(`${API_URL}/products`),
+        fetch(`${API_URL}/reservations`)
+      ]);
+      const prods = await prodsRes.json();
+      const reservationsRaw = await reservationsRes.json();
+
+      const skuToId = {};
+      prods.forEach(p => { skuToId[p.sku] = p.id; });
+
+      const reservationsMapped = reservationsRaw.map(r => ({
+        id: r.id,
+        productId: skuToId[r.product_sku] || null,
+        productSku: r.product_sku,
+        productName: r.product_name,
+        quantity: r.reserved_quantity,
+        customerName: r.customer_name,
+        date: r.created_at ? new Date(r.created_at).toLocaleDateString() : '',
+        status: r.status,
+        price: r.product_price || 0,
+        salesPerson: r.sales_person || r.salesPerson || '',
+        discount: r.discount || 0,
+        vat: r.vat || 0
+      }));
+
+      setStockData(prods);
+      setFilteredStockData(prods);
+      setReservations(reservationsMapped);
+      setIsReservationModalOpen(false);
+    } catch (e) {
+      alert('Error creating reservation: ' + (e.message || e));
+    }
   };
 
   // Get unique categories for filter dropdown
@@ -135,6 +225,14 @@ function App() {
   };
 
   const renderContent = () => {
+    if (loading) {
+      return <div className="loading-container"><p>Loading data...</p></div>;
+    }
+
+    if (error) {
+      return <div className="error-container"><p>Error: {error}</p></div>;
+    }
+
     if (isAdminView) {
       return (
         <AdminPage 
@@ -249,7 +347,7 @@ function App() {
                   const subtotal = customerReservations.reduce((sum, res) => sum + (res.quantity * res.price), 0);
                   const discountAmount = Math.min(discount, subtotal);
                   const afterDiscount = subtotal - discountAmount;
-                  const vatAmount = vat > 0 ? afterDiscount * 0.07 : 0;
+                  const vatAmount = vat > 0 ? afterDiscount * (vat / 100) : 0;
                   const finalTotal = afterDiscount + vatAmount;
                   
                   return (
@@ -275,7 +373,7 @@ function App() {
                         )}
                         <p><span>After Discount:</span> ฿{afterDiscount.toFixed(2)}</p>
                         {vat > 0 && (
-                          <p><span>VAT 7%:</span> ฿{vatAmount.toFixed(2)}</p>
+                          <p><span>VAT {vat}%:</span> ฿{vatAmount.toFixed(2)}</p>
                         )}
                         <p><span>Total Amount:</span> ฿{finalTotal.toFixed(2)}</p>
                         <p><span>Total Items:</span> {totalItems}</p>

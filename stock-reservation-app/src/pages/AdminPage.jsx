@@ -23,6 +23,22 @@ const AdminPage = ({
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [replenishQuantity, setReplenishQuantity] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem('adminActiveTab') || 'reservations';
+    } catch (e) {
+      return 'reservations';
+    }
+  });
+
+  // persist active tab
+  useEffect(() => {
+    try {
+      localStorage.setItem('adminActiveTab', activeTab);
+    } catch (e) {
+      // ignore
+    }
+  }, [activeTab]);
 
   // Check for stored authentication on component mount
   useEffect(() => {
@@ -88,6 +104,82 @@ const AdminPage = ({
     }
   };
 
+  // Create new database
+  const handleCreateDatabase = async () => {
+    if (!window.confirm("Are you sure you want to create a new database? This will delete all existing data.")) {
+      return;
+    }
+    
+    try {
+      const res = await fetch('http://localhost:3002/api/database/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to create database');
+      }
+      
+      // Refresh data
+      const [productsRes, reservationsRes] = await Promise.all([
+        fetch('http://localhost:3002/api/products'),
+        fetch('http://localhost:3002/api/reservations')
+      ]);
+      
+      const productsData = await productsRes.json();
+      const reservationsData = await reservationsRes.json();
+      
+      // Map reservations to frontend shape
+      const mapped = reservationsData.map(r => ({
+        id: r.id,
+        productId: productsData.find(p => p.sku === r.product_sku)?.id || null,
+        productSku: r.product_sku,
+        productName: r.product_name,
+        quantity: r.reserved_quantity,
+        customerName: r.customer_name,
+        date: r.created_at ? new Date(r.created_at).toLocaleDateString() : '',
+        status: r.status,
+        price: r.product_price || 0,
+        salesPerson: r.salesPerson || ''
+      }));
+      
+      setStockData(productsData);
+      setReservations(mapped);
+      
+      alert('Database created successfully!');
+    } catch (e) {
+      alert('Error creating database: ' + (e.message || e));
+    }
+  };
+
+  // Delete all database data
+  const handleDeleteDatabase = async () => {
+    if (!window.confirm("Are you sure you want to delete all data? This action cannot be undone.")) {
+      return;
+    }
+    
+    try {
+      const res = await fetch('http://localhost:3002/api/database/delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to delete database');
+      }
+      
+      // Clear data
+      setStockData([]);
+      setReservations([]);
+      
+      alert('All data deleted successfully!');
+    } catch (e) {
+      alert('Error deleting database: ' + (e.message || e));
+    }
+  };
+
   // Handle logout
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -117,7 +209,6 @@ const AdminPage = ({
           
           // Transform the data to match our stock format
           const stockData = jsonData.map((item, index) => ({
-            id: index + 1,
             sku: item.sku || item.SKU || item.Sku || '',
             name: item.name || item.Name || item.product || item.Product || 'Unknown Product',
             category: item.category || item.Category || item.type || item.Type || 'Uncategorized',
@@ -125,8 +216,36 @@ const AdminPage = ({
             quantity: parseInt(item.quantity || item.Quantity || item.stock || item.Stock) || 0
           }));
           
-          setStockData(stockData);
-          alert(`Successfully imported ${stockData.length} products from Excel file!`);
+          // Filter out items without SKU
+          const validStockData = stockData.filter(item => item.sku);
+          
+          // Send to backend
+          (async () => {
+            try {
+              const res = await fetch('http://localhost:3002/api/products/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(validStockData)
+              });
+              
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to import products');
+              }
+              
+              const result = await res.json();
+              
+              // Refresh product list from server
+              const prodsRes = await fetch('http://localhost:3002/api/products');
+              const prods = await prodsRes.json();
+              setStockData(prods);
+              
+              alert(`Successfully imported ${result.successCount} products! ${result.errorCount > 0 ? `(${result.errorCount} errors)` : ''}`);
+            } catch (error) {
+              console.error('Error importing products:', error);
+              alert('Error importing products: ' + (error.message || error));
+            }
+          })();
         } catch (error) {
           console.error('Error parsing Excel file:', error);
           alert('Error parsing Excel file. Please make sure it is a valid Excel file with the correct format.');
@@ -159,15 +278,31 @@ const AdminPage = ({
       return;
     }
 
-    // Update stock data
-    const updatedStockData = stockData.map(item => 
-      item.id === productId 
-        ? { ...item, quantity: item.quantity - quantity } 
-        : item
-    );
-    
-    setStockData(updatedStockData);
-    alert(`Successfully deducted ${quantity} units from ${product.name}`);
+    (async () => {
+        try {
+          const product = stockData.find(item => item.id === productId);
+          const res = await fetch(`http://localhost:3002/api/products/${product.sku}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quantity: product.quantity - quantity })
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to deduct stock');
+          }
+
+          // update local state
+          const updatedStockData = stockData.map(item => 
+            item.id === productId 
+              ? { ...item, quantity: item.quantity - quantity } 
+              : item
+          );
+          setStockData(updatedStockData);
+          alert(`Successfully deducted ${quantity} units from ${product.name}`);
+        } catch (e) {
+          alert('Error deducting stock: ' + (e.message || e));
+        }
+      })();
   };
 
   // Stock replenishment function
@@ -185,15 +320,30 @@ const AdminPage = ({
       return;
     }
     
-    // Update stock data
-    const updatedStockData = stockData.map(item => 
-      item.id === selectedProduct.id 
-        ? { ...item, quantity: item.quantity + quantity } 
-        : item
-    );
-    
-    setStockData(updatedStockData);
-    alert(`Successfully replenished ${quantity} units to ${selectedProduct.name}`);
+    // Update via API
+    (async () => {
+      try {
+        const res = await fetch(`http://localhost:3002/api/products/${selectedProduct.sku}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quantity: selectedProduct.quantity + quantity })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to replenish stock');
+        }
+
+        const updatedStockData = stockData.map(item => 
+          item.id === selectedProduct.id 
+            ? { ...item, quantity: item.quantity + quantity } 
+            : item
+        );
+        setStockData(updatedStockData);
+        alert(`Successfully replenished ${quantity} units to ${selectedProduct.name}`);
+      } catch (e) {
+        alert('Error replenishing stock: ' + (e.message || e));
+      }
+    })();
     
     // Reset form
     setSearchTerm('');
@@ -209,11 +359,57 @@ const AdminPage = ({
       return;
     }
 
-    // Remove reservation
-    const updatedReservations = reservations.filter(res => res.id !== reservationId);
-    setReservations(updatedReservations);
+    // Call API to cancel (status change)
+    (async () => {
+      try {
+        const res = await fetch(`http://localhost:3002/api/reservations/${reservationId}/status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'cancelled' })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to cancel reservation');
+        }
 
-    alert(`Reservation for ${reservation.productName} has been cancelled`);
+        // reflect locally (product quantity will be updated by server)
+        const updatedReservations = reservations.map(resv => resv.id === reservationId ? { ...resv, status: 'cancelled' } : resv);
+        setReservations(updatedReservations);
+        // refresh product list and reservations from server to get updated quantities
+        const [prodsRes, reservationsRes] = await Promise.all([
+          fetch('http://localhost:3002/api/products'),
+          fetch('http://localhost:3002/api/reservations')
+        ]);
+        const prods = await prodsRes.json();
+        const reservationsData = await reservationsRes.json();
+        
+        // map reservations to frontend shape
+        const skuToId = {};
+        prods.forEach(p => { skuToId[p.sku] = p.id; });
+        
+        const mapped = reservationsData.map(r => ({
+          id: r.id,
+          productId: skuToId[r.product_sku] || null,
+          productSku: r.product_sku,
+          productName: r.product_name,
+          quantity: r.reserved_quantity,
+          customerName: r.customer_name,
+          date: r.created_at ? new Date(r.created_at).toLocaleDateString() : '',
+          status: r.status,
+          price: r.product_price || 0,
+          salesPerson: r.sales_person || r.salesPerson || '',
+          discount: r.discount || 0,
+          vat: r.vat || 0
+        }));
+
+        setStockData(prods);
+        setReservations(mapped);
+
+        alert(`Reservation for ${reservation.productName} has been cancelled`);
+      } catch (e) {
+        alert('Error cancelling reservation: ' + (e.message || e));
+      }
+    })();
   };
 
   // Reservation acceptance function
@@ -229,284 +425,186 @@ const AdminPage = ({
       return;
     }
 
-    // Deduct stock
-    const updatedStockData = stockData.map(item => 
-      item.id === reservation.productId 
-        ? { ...item, quantity: item.quantity - reservation.quantity } 
-        : item
-    );
-    
-    setStockData(updatedStockData);
-
-    // Update reservation status
-    const updatedReservations = reservations.map(res => 
-      res.id === reservation.id 
-        ? { ...res, status: 'completed' } 
-        : res
-    );
-    
-    setReservations(updatedReservations);
-
-    alert(`Reservation for ${reservation.productName} has been accepted. Stock has been deducted.`);
-  };
-
-  // Reservation update function
-  const handleUpdateReservation = (reservationId, newQuantity) => {
-    const reservation = reservations.find(res => res.id === reservationId);
-    if (!reservation) {
-      alert('Reservation not found');
-      return;
-    }
-
-    const product = stockData.find(item => item.id === reservation.productId);
-    if (!product) {
-      alert('Product not found');
-      return;
-    }
-
-    if (newQuantity > product.quantity) {
-      alert(`Cannot update reservation. Only ${product.quantity} units available in stock.`);
-      return;
-    }
-
-    // Update reservation quantity
-    const updatedReservations = reservations.map(res => 
-      res.id === reservationId 
-        ? { ...res, quantity: newQuantity } 
-        : res
-    );
-    
-    setReservations(updatedReservations);
-    alert(`Reservation for ${reservation.productName} has been updated to ${newQuantity} units.`);
-  };
-
-  // Prepare chart data
-  const chartData = {
-    labels: stockData.map(item => item.name),
-    datasets: [
-      {
-        label: 'Available Stock',
-        data: stockData.map(item => item.quantity),
-        backgroundColor: 'rgba(75, 192, 192, 0.6)',
-        borderColor: 'rgba(75, 192, 192, 1)',
-        borderWidth: 1,
-      },
-    ],
-  };
-
-  const chartOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-      title: {
-        display: true,
-        text: 'Current Stock Levels',
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        title: {
-          display: true,
-          text: 'Quantity'
+    // Call API to mark completed (server will deduct stock if necessary)
+    (async () => {
+      try {
+        const res = await fetch(`http://localhost:3002/api/reservations/${reservation.id}/status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'completed' })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to accept reservation');
         }
-      },
-      x: {
-        title: {
-          display: true,
-          text: 'Products'
-        }
+
+        const updatedReservations = reservations.map(resv => resv.id === reservation.id ? { ...resv, status: 'completed' } : resv);
+        setReservations(updatedReservations);
+
+        // refresh products and reservations
+        const [prodsRes, reservationsRes] = await Promise.all([
+          fetch('http://localhost:3002/api/products'),
+          fetch('http://localhost:3002/api/reservations')
+        ]);
+        const prods = await prodsRes.json();
+        const reservationsData = await reservationsRes.json();
+        
+        // map reservations to frontend shape
+        const skuToId = {};
+        prods.forEach(p => { skuToId[p.sku] = p.id; });
+        
+        const mapped = reservationsData.map(r => ({
+          id: r.id,
+          productId: skuToId[r.product_sku] || null,
+          productSku: r.product_sku,
+          productName: r.product_name,
+          quantity: r.reserved_quantity,
+          customerName: r.customer_name,
+          date: r.created_at ? new Date(r.created_at).toLocaleDateString() : '',
+          status: r.status,
+          price: r.product_price || 0,
+          salesPerson: r.sales_person || r.salesPerson || '',
+          discount: r.discount || 0,
+          vat: r.vat || 0
+        }));
+
+        setStockData(prods);
+        setReservations(mapped);
+
+        alert(`Reservation for ${reservation.productName} has been accepted. Stock has been deducted.`);
+      } catch (e) {
+        alert('Error accepting reservation: ' + (e.message || e));
       }
-    }
+    })();
   };
-
-  if (showAuthForm) {
-    return (
-      <div className="admin-auth-container">
-        <div className="admin-auth-box">
-          <h2>Admin Access</h2>
-          <p>Please enter the admin password to continue</p>
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label htmlFor="password">Password:</label>
-              <input
-                type="password"
-                id="password"
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
-                placeholder="Enter admin password"
-                required
-              />
-            </div>
-            <div className="form-group remember-me">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                />
-                Remember me
-              </label>
-            </div>
-            <button type="submit" className="btn btn-primary">Login</button>
-            <button type="button" className="btn btn-secondary" onClick={onBack}>
-              Back to User View
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="admin-page app-main">
-        <section className="admin-section">
-          <div className="admin-header">
-            <h2>Stock Management</h2>
-            <button className="btn btn-secondary" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-          
-          {/* Stock Chart */}
-          <div className="admin-chart-section">
-            <h3>Stock Overview</h3>
-            <div className="chart-container">
-              <Bar data={chartData} options={chartOptions} />
-            </div>
-          </div>
-          
-          {/* Stock Replenishment Form */}
-          <div className="admin-replenish-section">
-            <h3>Replenish Stock</h3>
-            <form onSubmit={handleReplenishStock} className="replenish-form">
-              <div className="form-row">
-                <div className="form-group search-group">
-                  <label htmlFor="productSearch">Product:</label>
-                  <div className="search-container">
-                    <input
-                      type="text"
-                      id="productSearch"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search for a product..."
-                      className="search-input"
-                    />
-                    {suggestions.length > 0 && (
-                      <ul className="suggestions-list">
-                        {suggestions.map(product => (
-                          <li 
-                            key={product.id} 
-                            onClick={() => handleSelectProduct(product)}
-                            className="suggestion-item"
-                          >
-                            {product.name} (Available: {product.quantity})
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  {selectedProduct && (
-                    <div className="selected-product">
-                      Selected: {selectedProduct.name} (Current Stock: {selectedProduct.quantity})
-                    </div>
-                  )}
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="replenishQuantity">Quantity to Add:</label>
-                  <input
-                    type="number"
-                    id="replenishQuantity"
-                    min="1"
-                    value={replenishQuantity}
-                    onChange={(e) => setReplenishQuantity(e.target.value)}
-                    placeholder="Enter quantity"
-                    required
-                  />
-                </div>
+    <div className="admin-page">
+      <header className="admin-header">
+        <h1>Admin Dashboard</h1>
+        <div className="admin-actions">
+          <button onClick={() => setActiveTab('stock')} className={activeTab === 'stock' ? 'active' : ''}>Stock Management</button>
+          <button onClick={() => setActiveTab('reservations')} className={activeTab === 'reservations' ? 'active' : ''}>Reservation Management</button>
+          <button onClick={handleLogout}>Logout</button>
+          <button onClick={onBack}>Back</button>
+        </div>
+      </header>
+
+      <main className="admin-main">
+        {!isAuthenticated && showAuthForm && (
+          <div className="admin-auth-overlay">
+            <form className="admin-auth-form" onSubmit={handleLogin}>
+              <h2>Admin Login</h2>
+              <input
+                type="password"
+                placeholder="Enter admin password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+              />
+              <label>
+                <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} /> Remember me
+              </label>
+              <div className="auth-actions">
+                <button type="submit">Login</button>
+                <button type="button" onClick={() => { setShowAuthForm(false); setAdminPassword(''); }}>Close</button>
               </div>
-              
-              <button type="submit" className="btn btn-primary">
-                Replenish Stock
-              </button>
             </form>
           </div>
-          
-          {/* Excel Upload Section */}
-          <div className="admin-upload-section">
-            <h3>Upload Stock Data</h3>
-            <p>Upload an Excel file to update stock information</p>
-            <div className="upload-controls">
-              <label htmlFor="excel-file" className="upload-btn">
-                Choose Excel File
-              </label>
-              <input
-                id="excel-file"
-                type="file"
-                accept=".xlsx"
-                onChange={handleExcelUpload}
-                className="file-input"
-              />
-              <small>Note: Excel file should have columns: name, category, price, quantity. A template is available at /stock-template.xlsx</small>
+        )}
+        {activeTab === 'stock' && (
+          <section className="admin-section">
+            <h2>Stock Management</h2>
+            <AdminStockTable stockData={stockData} onDeductStock={handleDeductStock} />
+            <div className="replenish-quick-form">
+              <h3>Quick Replenish</h3>
+              <div className="replenish-form-row">
+                <input
+                  type="text"
+                  placeholder="Search product..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <div className="suggestions-list">
+                  {suggestions.slice(0,5).map(s => (
+                    <div key={s.sku} className="suggestion-item" onClick={() => handleSelectProduct(s)}>
+                      {s.name} ({s.sku})
+                    </div>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Quantity"
+                  value={replenishQuantity}
+                  onChange={(e) => setReplenishQuantity(e.target.value)}
+                />
+                <button onClick={handleReplenishStock}>Replenish</button>
+              </div>
             </div>
-          </div>
-          
-          <AdminStockTable 
-            stockData={stockData} 
-            onDeductStock={handleDeductStock} 
-          />
-        </section>
+            <div className="upload-area">
+              <h3>Import Excel</h3>
+              <input type="file" accept=".xlsx" onChange={handleExcelUpload} />
+            </div>
+            <div className="database-actions">
+              <button onClick={handleCreateDatabase}>Create Database</button>
+              <button onClick={handleDeleteDatabase}>Delete All Data</button>
+            </div>
+          </section>
+        )}
 
-        <section className="admin-section">
-          <h2>Reservation Management</h2>
-          <ReservationManagement 
-            reservations={reservations} 
-            stockData={stockData}
-            onCancelReservation={handleCancelReservation} 
-            onAcceptReservation={handleAcceptReservation}
-            onUpdateReservation={handleUpdateReservation}
-          />
-        </section>
+        {activeTab === 'reservations' && (
+          <div className="tab-content reservations-tab">
+            <div>
+              <section className="admin-section">
+                <h2>Reservation Management</h2>
+                <ReservationManagement 
+                  reservations={reservations} 
+                  stockData={stockData}
+                  onCancelReservation={handleCancelReservation} 
+                  onAcceptReservation={handleAcceptReservation}
+                />
+              </section>
 
-        <section className="admin-section summary-section">
-          <h2>Inventory Summary</h2>
-          <div className="summary-cards">
-            <div className="summary-card">
-              <h3>Total Products</h3>
-              <p className="summary-value">{stockData.length}</p>
-            </div>
-            <div className="summary-card">
-              <h3>Total Stock Units</h3>
-              <p className="summary-value">
-                {stockData.reduce((sum, item) => sum + item.quantity, 0)}
-              </p>
-            </div>
-            <div className="summary-card">
-              <h3>Total Reservations</h3>
-              <p className="summary-value">{reservations.length}</p>
-            </div>
-            <div className="summary-card">
-              <h3>Reserved Units</h3>
-              <p className="summary-value">
-                {reservations.reduce((sum, res) => sum + res.quantity, 0)}
-              </p>
+              <section className="admin-section summary-section">
+                <h2>Inventory Summary</h2>
+                <div className="summary-cards">
+                  <div className="summary-card">
+                    <h3>Total Products</h3>
+                    <p className="summary-value">{stockData.length}</p>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Total Stock Units</h3>
+                    <p className="summary-value">
+                      {stockData.reduce((sum, item) => sum + item.quantity, 0)}
+                    </p>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Total Reservations</h3>
+                    <p className="summary-value">{reservations.length}</p>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Reserved Units</h3>
+                    <p className="summary-value">
+                      {reservations.reduce((sum, res) => sum + res.quantity, 0)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="admin-instructions">
+                  <h3>Admin Instructions</h3>
+                  <ul>
+                    <li>Use the Stock Management tab to upload new inventory data and deduct stock</li>
+                    <li>Use the Reservation Management tab to accept or cancel reservations</li>
+                    <li>When you Accept a reservation, the stock will be automatically deducted</li>
+                    <li>Password for admin access: <strong>admin123</strong></li>
+                    <li>All actions are logged and tracked for accountability</li>
+                  </ul>
+                </div>
+              </section>
             </div>
           </div>
-          
-          <div className="admin-instructions">
-            <h3>Admin Instructions</h3>
-            <ul>
-              <li>Use the Stock Management tab to upload new inventory data and deduct stock</li>
-              <li>Use the Reservation Management tab to accept or cancel reservations</li>
-              <li>When you Accept a reservation, the stock will be automatically deducted</li>
-              <li>Password for admin access: <strong>admin123</strong></li>
-              <li>All actions are logged and tracked for accountability</li>
-            </ul>
-          </div>
-        </section>
+        )}
+      </main>
     </div>
   );
 };

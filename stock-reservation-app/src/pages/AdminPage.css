@@ -1262,3 +1262,75 @@
     font-size: 0.9rem;
   }
 }
+
+/* Database Management Section */
+.admin-database-section {
+  background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 100%);
+  padding: 30px;
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.admin-database-section h3 {
+  color: var(--dark-bg);
+  margin: 0 0 20px 0;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+.database-controls {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
+
+.control-group small {
+  color: #4a5568;
+  font-size: 0.9rem;
+  max-width: 200px;
+}
+
+.btn-warning {
+  background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(255, 193, 7, 0.4);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #f44336 0%, #e91e63 100%);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(244, 67, 54, 0.4);
+}
+
+@media (max-width: 768px) {
+  .admin-database-section {
+    padding: 20px;
+  }
+  
+  .database-controls {
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .admin-database-section h3 {
+    font-size: 1.5rem;
+  }
+}
