@@ -1,746 +1,446 @@
 const express = require("express");
 const cors = require("cors");
-const sqlite3 = require("sqlite3").verbose();
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// === DB (ไฟล์ local) ===
-const db = new sqlite3.Database("data.db");
+// Supabase client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// สร้างตารางถ้ายังไม่มี
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sku TEXT UNIQUE,
-      name TEXT,
-      category TEXT,
-      price REAL,
-      quantity INTEGER
-    )
-  `);
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('Missing Supabase configuration. Please check your .env file.');
+  process.exit(1);
+}
 
-  // สร้างตารางการจองสต๊อก
-  db.run(`
-    CREATE TABLE IF NOT EXISTS reservations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      product_sku TEXT,
-      customer_name TEXT,
-      reserved_quantity INTEGER,
-      status TEXT DEFAULT 'pending', -- pending, confirmed, cancelled
-      discount REAL DEFAULT 0,
-      vat REAL DEFAULT 0,
-      sales_person TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (product_sku) REFERENCES products (sku)
-    )
-  `);
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+console.log('Connected to Supabase database.');
+
+// ===== Helper Functions =====
+async function fetchProductsMapBySku() {
+  const { data: products, error } = await supabase.from('products').select('*');
+  if (error) throw error;
   
-  // Add columns if they don't exist (for existing databases)
-  db.run(`ALTER TABLE reservations ADD COLUMN discount REAL DEFAULT 0`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding discount column:', err);
-    }
+  const map = {};
+  products.forEach(p => {
+    map[p.sku] = p;
   });
-  
-  db.run(`ALTER TABLE reservations ADD COLUMN vat REAL DEFAULT 0`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding vat column:', err);
-    }
-  });
-  
-  db.run(`ALTER TABLE reservations ADD COLUMN sales_person TEXT`, (err) => {
-    if (err && !err.message.includes('duplicate column name')) {
-      console.error('Error adding sales_person column:', err);
-    }
-  });
-});
+  return map;
+}
 
-// seed ครั้งแรก
-db.get("SELECT COUNT(*) AS c FROM products", (err, row) => {
-  if (err) {
-    console.error(err);
-    return;
-  }
-  
-  if (row.c === 0) {
-    const stmt = db.prepare(`
-      INSERT INTO products (sku, name, category, price, quantity)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    
-    stmt.run("BTH-0001", "Single-Handle Basin Faucet", "Faucet", 1290, 25);
-    stmt.run("BTH-0002", "Wall-Mounted Shower Set", "Shower", 2590, 18);
-    stmt.run("BTH-0003", "One-Piece Toilet 4.8L", "Toilet", 6490, 10);
-    stmt.run("BTH-0004", "Pedestal Basin 50cm", "Basin", 1890, 14);
-    stmt.finalize();
-    
-    console.log("Seeded sample rows.");
-  }
-});
+// ===== CSV export helpers =====
+function sendCsv(res, headers, rows, filename) {
+  const csvRows = [headers.join(',')];
+  rows.forEach(row => csvRows.push(row.join(',')));
+  res.header('Content-Type', 'text/csv');
+  res.header('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csvRows.join('\n'));
+}
 
-// ====== API ======
+// ===== API Endpoints =====
 
 // Export products to CSV
-app.get("/api/products/export", (req, res) => {
-  db.all("SELECT * FROM products ORDER BY id DESC", (err, rows) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    
-    // Create CSV header
+app.get('/api/products/export', async (req, res) => {
+  try {
+    const { data: rows, error } = await supabase.from('products').select('*').order('id', { ascending: false });
+    if (error) throw error;
+
     const headers = ['ID', 'SKU', 'Name', 'Category', 'Price', 'Quantity'];
-    const csvRows = [headers.join(',')];
-    
-    // Add data rows
-    rows.forEach(row => {
-      const values = [
-        row.id,
-        `"${row.sku}"`,
-        `"${row.name}"`,
-        `"${row.category}"`,
-        row.price,
-        row.quantity
-      ];
-      csvRows.push(values.join(','));
-    });
-    
-    // Set headers for CSV download
-    res.header('Content-Type', 'text/csv');
-    res.header('Content-Disposition', 'attachment; filename="products.csv"');
-    res.send(csvRows.join('\n'));
-  });
+    const csvRows = rows.map(row => [row.id, `"${row.sku}"`, `"${row.name}"`, `"${row.category}"`, row.price, row.quantity]);
+    sendCsv(res, headers, csvRows, 'products.csv');
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
 // Export reservations to CSV
-app.get("/api/reservations/export", (req, res) => {
-  db.all(`
-    SELECT r.*, p.name as product_name, p.price as product_price
-    FROM reservations r
-    JOIN products p ON r.product_sku = p.sku
-    ORDER BY r.created_at DESC
-  `, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    
-    // Create CSV header
+app.get('/api/reservations/export', async (req, res) => {
+  try {
+    const { data: reservations, error: rerr } = await supabase.from('reservations').select('*').order('created_at', { ascending: false });
+    if (rerr) throw rerr;
+
+    const productsMap = await fetchProductsMapBySku();
+
     const headers = ['ID', 'Product SKU', 'Product Name', 'Customer Name', 'Sales Person', 'Quantity', 'Status', 'Discount', 'VAT', 'Created At', 'Updated At'];
-    const csvRows = [headers.join(',')];
-    
-    // Add data rows
-    rows.forEach(row => {
-      const values = [
-        row.id,
-        `"${row.product_sku}"`,
-        `"${row.product_name}"`,
-        `"${row.customer_name}"`,
-        `"${row.sales_person || ''}"`,
-        row.reserved_quantity,
-        `"${row.status}"`,
-        row.discount || 0,
-        row.vat || 0,
-        `"${row.created_at}"`,
-        `"${row.updated_at}"`
-      ];
-      csvRows.push(values.join(','));
-    });
-    
-    // Set headers for CSV download
-    res.header('Content-Type', 'text/csv');
-    res.header('Content-Disposition', 'attachment; filename="reservations.csv"');
-    res.send(csvRows.join('\n'));
-  });
+    const csvRows = reservations.map(row => [
+      row.id,
+      `"${row.product_sku}"`,
+      `"${(productsMap[row.product_sku] && productsMap[row.product_sku].name) || ''}"`,
+      `"${row.customer_name}"`,
+      `"${row.sales_person || ''}"`,
+      row.reserved_quantity,
+      `"${row.status}"`,
+      row.discount || 0,
+      row.vat || 0,
+      `"${row.created_at || ''}"`,
+      `"${row.updated_at || ''}"`
+    ]);
+
+    sendCsv(res, headers, csvRows, 'reservations.csv');
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// ดึงทั้งหมด
-app.get("/api/products", (req, res) => {
-  db.all("SELECT * FROM products ORDER BY id DESC", (err, rows) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    res.json(rows);
-  });
+// Get all products
+app.get('/api/products', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('products').select('*').order('id', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// ดึงตาม SKU
-app.get("/api/products/:sku", (req, res) => {
-  db.get("SELECT * FROM products WHERE sku = ?", [req.params.sku], (err, row) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (!row) return res.status(404).json({ ok: false, error: "not found" });
-    res.json(row);
-  });
+// Get product by SKU
+app.get('/api/products/:sku', async (req, res) => {
+  try {
+    const sku = req.params.sku;
+    const { data, error } = await supabase.from('products').select('*').eq('sku', sku).limit(1).maybeSingle();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// เพิ่มสินค้าใหม่
-app.post("/api/products", (req, res) => {
-  const { sku, name, category, price, quantity } = req.body || {};
-  if (!sku) return res.status(400).json({ ok: false, error: "sku required" });
-  
-  const stmt = db.prepare(`
-    INSERT INTO products (sku, name, category, price, quantity)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  
-  stmt.run([sku, name, category, price, quantity], function(err) {
-    if (err) {
-      return res.status(400).json({ ok: false, error: err.message });
-    }
-    res.json({ ok: true, id: this.lastID });
-  });
-  
-  stmt.finalize();
+// Create product
+app.post('/api/products', async (req, res) => {
+  try {
+    const { sku, name, category, price, quantity } = req.body || {};
+    if (!sku) return res.status(400).json({ ok: false, error: 'sku required' });
+
+    const { data, error } = await supabase.from('products').insert([{ sku, name, category, price, quantity }]);
+    if (error) return res.status(400).json({ ok: false, error: error.message || error });
+    res.json({ ok: true, id: data[0].id });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// อัปเดตตาม SKU (อัปเดตเฉพาะฟิลด์ที่ส่งมา)
-app.put("/api/products/:sku", (req, res) => {
-  const { name, category, price, quantity } = req.body || {};
-  
-  // ตรวจสอบว่ามีสินค้าหรือไม่
-  db.get("SELECT id FROM products WHERE sku = ?", [req.params.sku], (err, row) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (!row) return res.status(404).json({ ok: false, error: "not found" });
-    
-    // สร้าง query สำหรับ update
-    let setClause = [];
-    let params = [];
-    
-    if (name !== undefined) {
-      setClause.push("name = ?");
-      params.push(name);
-    }
-    if (category !== undefined) {
-      setClause.push("category = ?");
-      params.push(category);
-    }
-    if (price !== undefined) {
-      setClause.push("price = ?");
-      params.push(price);
-    }
-    if (quantity !== undefined) {
-      setClause.push("quantity = ?");
-      params.push(quantity);
-    }
-    
-    // ถ้าไม่มี field ที่จะ update
-    if (setClause.length === 0) {
-      return res.json({ ok: true, changes: 0 });
-    }
-    
-    params.push(req.params.sku);
-    
-    const stmt = db.prepare(`
-      UPDATE products
-      SET ${setClause.join(", ")}
-      WHERE sku = ?
-    `);
-    
-    stmt.run(params, function(err) {
-      if (err) {
-        return res.status(500).json({ ok: false, error: err.message });
-      }
-      res.json({ ok: true, changes: this.changes });
-    });
-    
-    stmt.finalize();
-  });
+// Update product by SKU (partial)
+app.put('/api/products/:sku', async (req, res) => {
+  try {
+    const sku = req.params.sku;
+    const { name, category, price, quantity } = req.body || {};
+
+    // Ensure product exists
+    const { data: existing, error: gerr } = await supabase.from('products').select('id').eq('sku', sku).limit(1).maybeSingle();
+    if (gerr) throw gerr;
+    if (!existing) return res.status(404).json({ ok: false, error: 'not found' });
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (category !== undefined) updates.category = category;
+    if (price !== undefined) updates.price = price;
+    if (quantity !== undefined) updates.quantity = quantity;
+
+    if (Object.keys(updates).length === 0) return res.json({ ok: true, changes: 0 });
+
+    const { error } = await supabase.from('products').update(updates).eq('sku', sku);
+    if (error) throw error;
+    res.json({ ok: true, changes: 1 });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// ลบตาม SKU
-app.delete("/api/products/:sku", (req, res) => {
-  const stmt = db.prepare("DELETE FROM products WHERE sku = ?");
-  
-  stmt.run([req.params.sku], function(err) {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (this.changes === 0) return res.status(404).json({ ok: false, error: "not found" });
-    res.json({ ok: true, deleted: req.params.sku });
-  });
-  
-  stmt.finalize();
+// Delete product by SKU
+app.delete('/api/products/:sku', async (req, res) => {
+  try {
+    const sku = req.params.sku;
+    const { error } = await supabase.from('products').delete().eq('sku', sku);
+    if (error) throw error;
+    res.json({ ok: true, deleted: sku });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
 // ====== Reservation API ======
 
-// ดึงการจองทั้งหมด
-app.get("/api/reservations", (req, res) => {
-  db.all(`
-    SELECT r.*, p.name as product_name, p.price as product_price
-    FROM reservations r
-    JOIN products p ON r.product_sku = p.sku
-    ORDER BY r.created_at DESC
-  `, (err, rows) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    res.json(rows);
-  });
+// Get all reservations
+app.get('/api/reservations', async (req, res) => {
+  try {
+    const { data: reservations, error: rerr } = await supabase.from('reservations').select('*').order('created_at', { ascending: false });
+    if (rerr) throw rerr;
+
+    const productsMap = await fetchProductsMapBySku();
+
+    const mapped = (reservations || []).map(r => ({
+      ...r,
+      product_name: (productsMap[r.product_sku] && productsMap[r.product_sku].name) || null,
+      product_price: (productsMap[r.product_sku] && productsMap[r.product_sku].price) || 0
+    }));
+
+    res.json(mapped);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// ดึงการจองตาม ID
-app.get("/api/reservations/:id", (req, res) => {
-  db.get(`
-    SELECT r.*, p.name as product_name, p.price as product_price
-    FROM reservations r
-    JOIN products p ON r.product_sku = p.sku
-    WHERE r.id = ?
-  `, [req.params.id], (err, row) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (!row) return res.status(404).json({ ok: false, error: "not found" });
-    res.json(row);
-  });
+// Get reservation by id
+app.get('/api/reservations/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { data: reservation, error: rerr } = await supabase.from('reservations').select('*').eq('id', id).limit(1).maybeSingle();
+    if (rerr) throw rerr;
+    if (!reservation) return res.status(404).json({ ok: false, error: 'not found' });
+
+    const { data: product } = await supabase.from('products').select('*').eq('sku', reservation.product_sku).limit(1).maybeSingle();
+    res.json({ ...reservation, product_name: product ? product.name : null, product_price: product ? product.price : 0 });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// สร้างการจองใหม่
-app.post("/api/reservations", (req, res) => {
-  const { product_sku, customer_name, reserved_quantity, discount = 0, vat = 0, sales_person = '' } = req.body || {};
-  
-  // ตรวจสอบข้อมูลที่จำเป็น
-  if (!product_sku) return res.status(400).json({ ok: false, error: "product_sku required" });
-  if (!customer_name) return res.status(400).json({ ok: false, error: "customer_name required" });
-  if (!reserved_quantity || reserved_quantity <= 0) return res.status(400).json({ ok: false, error: "reserved_quantity must be a positive number" });
-  
-  // ตรวจสอบว่ามีสินค้าหรือไม่
-  db.get("SELECT * FROM products WHERE sku = ?", [product_sku], (err, product) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (!product) return res.status(404).json({ ok: false, error: "product not found" });
-    
-    // ตรวจสอบว่ามีสต๊อกเพียงพอหรือไม่
+// Create reservation
+app.post('/api/reservations', async (req, res) => {
+  try {
+    const { product_sku, customer_name, reserved_quantity, discount = 0, vat = 0, sales_person = '' } = req.body || {};
+    if (!product_sku) return res.status(400).json({ ok: false, error: 'product_sku required' });
+    if (!customer_name) return res.status(400).json({ ok: false, error: 'customer_name required' });
+    if (!reserved_quantity || reserved_quantity <= 0) return res.status(400).json({ ok: false, error: 'reserved_quantity must be a positive number' });
+
+    // fetch product
+    const { data: product, error: perr } = await supabase.from('products').select('*').eq('sku', product_sku).limit(1).maybeSingle();
+    if (perr) throw perr;
+    if (!product) return res.status(404).json({ ok: false, error: 'product not found' });
+
     if (product.quantity < reserved_quantity) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: "insufficient stock",
-        available: product.quantity
-      });
+      return res.status(400).json({ ok: false, error: 'insufficient stock', available: product.quantity });
     }
-    
-    // เพิ่มการจอง
-    const insertReservation = db.prepare(`
-      INSERT INTO reservations (product_sku, customer_name, reserved_quantity, discount, vat, sales_person)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    
-    insertReservation.run([product_sku, customer_name, reserved_quantity, discount, vat, sales_person], function(err) {
-      if (err) {
-        return res.status(500).json({ ok: false, error: err.message });
-      }
-      
-      const reservationId = this.lastID;
-      
-      // ลดจำนวนสต๊อกในสินค้า
-      const updateProduct = db.prepare(`
-        UPDATE products 
-        SET quantity = quantity - ? 
-        WHERE sku = ?
-      `);
-      
-      updateProduct.run([reserved_quantity, product_sku], function(err) {
-        if (err) {
-          // ถ้าอัปเดตสต๊อกไม่สำเร็จ ให้ลบการจองที่เพิ่งสร้าง
-          db.run("DELETE FROM reservations WHERE id = ?", [reservationId]);
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        
-        res.json({ ok: true, id: reservationId });
-      });
-    });
-    
-    insertReservation.finalize();
-  });
+
+    // insert reservation
+    const { data: inserted, error: ierr } = await supabase.from('reservations').insert([{ product_sku, customer_name, reserved_quantity, discount, vat, sales_person }]);
+    if (ierr) throw ierr;
+
+    const reservationId = inserted[0].id;
+
+    // update product quantity (best-effort)
+    const { error: uerr } = await supabase.from('products').update({ quantity: product.quantity - reserved_quantity }).eq('sku', product_sku);
+    if (uerr) {
+      // attempt to delete reservation when update fails
+      await supabase.from('reservations').delete().eq('id', reservationId);
+      throw uerr;
+    }
+
+    res.json({ ok: true, id: reservationId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// อัปเดตสถานะการจอง
-app.put("/api/reservations/:id/status", (req, res) => {
-  const { status } = req.body || {};
-  const validStatuses = ['pending', 'confirmed', 'cancelled', 'completed'];
-  
-  if (!status || !validStatuses.includes(status)) {
-    return res.status(400).json({ 
-      ok: false, 
-      error: "status must be one of: pending, confirmed, cancelled, completed" 
-    });
-  }
-  
-  // ตรวจสอบว่ามีการจองหรือไม่
-  db.get("SELECT * FROM reservations WHERE id = ?", [req.params.id], (err, reservation) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (!reservation) return res.status(404).json({ ok: false, error: "reservation not found" });
-    
-    // ถ้าเปลี่ยนสถานะเป็น cancelled ต้องคืนสต๊อก
+// Update reservation status
+app.put('/api/reservations/:id/status', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body || {};
+    const validStatuses = ['pending', 'confirmed', 'cancelled', 'completed'];
+    if (!status || !validStatuses.includes(status)) return res.status(400).json({ ok: false, error: 'status must be one of: pending, confirmed, cancelled, completed' });
+
+    const { data: reservation, error: rerr } = await supabase.from('reservations').select('*').eq('id', id).limit(1).maybeSingle();
+    if (rerr) throw rerr;
+    if (!reservation) return res.status(404).json({ ok: false, error: 'reservation not found' });
+
+    // cancelled: return stock if not already cancelled
     if (status === 'cancelled' && reservation.status !== 'cancelled') {
-      // คืนสต๊อกให้สินค้า
-      const updateProduct = db.prepare(`
-        UPDATE products 
-        SET quantity = quantity + ? 
-        WHERE sku = ?
-      `);
-      
-      updateProduct.run([reservation.reserved_quantity, reservation.product_sku], function(err) {
-        if (err) {
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        
-        // อัปเดตสถานะการจอง
-        const update = db.prepare(`
-          UPDATE reservations 
-          SET status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `);
-        
-        update.run([status, req.params.id], function(err) {
-          if (err) {
-            // ถ้าอัปเดตสถานะไม่สำเร็จ ให้ย้อนกลับการคืนสต๊อก
-            const revertProduct = db.prepare(`
-              UPDATE products 
-              SET quantity = quantity - ? 
-              WHERE sku = ?
-            `);
-            revertProduct.run([reservation.reserved_quantity, reservation.product_sku]);
-            return res.status(500).json({ ok: false, error: err.message });
-          }
-          
-          res.json({ ok: true, changes: this.changes });
-        });
-      });
-    } 
-    // ถ้าเปลี่ยนสถานะเป็น completed ต้องลดสต๊อก
-    else if (status === 'completed' && reservation.status !== 'completed') {
-      // ตรวจสอบว่ามีสต๊อกเพียงพอหรือไม่
-      db.get("SELECT quantity FROM products WHERE sku = ?", [reservation.product_sku], (err, product) => {
-        if (err) {
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        
-        if (!product) {
-          return res.status(404).json({ ok: false, error: "product not found" });
-        }
-        
-        // ตรวจสอบว่ามีสต๊อกเพียงพอหรือไม่
-        if (product.quantity < reservation.reserved_quantity) {
-          return res.status(400).json({ 
-            ok: false, 
-            error: "insufficient stock",
-            available: product.quantity
-          });
-        }
-        
-        // อัปเดตสถานะการจอง
-        const update = db.prepare(`
-          UPDATE reservations 
-          SET status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `);
-        
-        update.run([status, req.params.id], function(err) {
-          if (err) {
-            return res.status(500).json({ ok: false, error: err.message });
-          }
-          
-          res.json({ ok: true, changes: this.changes });
-        });
-      });
-    } else {
-      // อัปเดตสถานะการจอง
-      const update = db.prepare(`
-        UPDATE reservations 
-        SET status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `);
-      
-      update.run([status, req.params.id], function(err) {
-        if (err) {
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        res.json({ ok: true, changes: this.changes });
-      });
-    }
-  });
-});
+      const { data: product, error: perr } = await supabase.from('products').select('*').eq('sku', reservation.product_sku).limit(1).maybeSingle();
+      if (perr) throw perr;
+      if (!product) return res.status(404).json({ ok: false, error: 'product not found' });
 
-// อัปเดตจำนวนการจอง
-app.put("/api/reservations/:id", (req, res) => {
-  const { reserved_quantity } = req.body || {};
-  
-  // ตรวจสอบข้อมูลที่จำเป็น
-  if (reserved_quantity === undefined || reserved_quantity <= 0) {
-    return res.status(400).json({ ok: false, error: "reserved_quantity must be a positive number" });
+      const { error: u1 } = await supabase.from('products').update({ quantity: product.quantity + reservation.reserved_quantity }).eq('sku', reservation.product_sku);
+      if (u1) throw u1;
+
+      const { error: u2 } = await supabase.from('reservations').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+      if (u2) {
+        // attempt to revert product
+        await supabase.from('products').update({ quantity: product.quantity }).eq('sku', reservation.product_sku);
+        throw u2;
+      }
+
+      return res.json({ ok: true, changes: 1 });
+    }
+
+    // completed: ensure stock still sufficient (this path assumes reserved items should be finalized)
+    if (status === 'completed' && reservation.status !== 'completed') {
+      const { data: product, error: perr } = await supabase.from('products').select('*').eq('sku', reservation.product_sku).limit(1).maybeSingle();
+      if (perr) throw perr;
+      if (!product) return res.status(404).json({ ok: false, error: 'product not found' });
+
+      if (product.quantity < reservation.reserved_quantity) return res.status(400).json({ ok: false, error: 'insufficient stock', available: product.quantity });
+
+      const { error: u } = await supabase.from('reservations').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+      if (u) throw u;
+      return res.json({ ok: true, changes: 1 });
+    }
+
+    // otherwise just update status
+    const { error } = await supabase.from('reservations').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    res.json({ ok: true, changes: 1 });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
   }
-  
-  // ตรวจสอบว่ามีการจองหรือไม่
-  db.get("SELECT * FROM reservations WHERE id = ?", [req.params.id], (err, reservation) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
-    }
-    if (!reservation) return res.status(404).json({ ok: false, error: "reservation not found" });
-    
-    // ตรวจสอบว่าสถานะเป็น pending หรือไม่
-    if (reservation.status !== 'pending') {
-      return res.status(400).json({ ok: false, error: "can only update quantity for pending reservations" });
-    }
-    
-    // ตรวจสอบว่ามีสินค้าหรือไม่
-    db.get("SELECT * FROM products WHERE sku = ?", [reservation.product_sku], (err, product) => {
-      if (err) {
-        return res.status(500).json({ ok: false, error: err.message });
-      }
-      if (!product) return res.status(404).json({ ok: false, error: "product not found" });
-      
-      // ตรวจสอบว่ามีสต๊อกเพียงพอหรือไม่
-      // ต้องคำนึงถึงจำนวนที่จองไว้เดิมด้วย
-      const availableQuantity = product.quantity + reservation.reserved_quantity;
-      if (reserved_quantity > availableQuantity) {
-        return res.status(400).json({ 
-          ok: false, 
-          error: "insufficient stock",
-          available: availableQuantity
-        });
-      }
-      
-      // อัปเดตจำนวนการจอง
-      const update = db.prepare(`
-        UPDATE reservations 
-        SET reserved_quantity = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `);
-      
-      update.run([reserved_quantity, req.params.id], function(err) {
-        if (err) {
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        
-        // อัปเดตสต๊อกในสินค้า (คืนสต๊อกเดิมและจองสต๊อกใหม่)
-        const updateProduct = db.prepare(`
-          UPDATE products 
-          SET quantity = quantity + ? - ?
-          WHERE sku = ?
-        `);
-        
-        updateProduct.run([reservation.reserved_quantity, reserved_quantity, reservation.product_sku], function(err) {
-          if (err) {
-            // ถ้าอัปเดตสต๊อกไม่สำเร็จ ให้ย้อนกลับการอัปเดตการจอง
-            const revertReservation = db.prepare(`
-              UPDATE reservations 
-              SET reserved_quantity = ?, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ?
-            `);
-            revertReservation.run([reservation.reserved_quantity, req.params.id]);
-            return res.status(500).json({ ok: false, error: err.message });
-          }
-          
-          res.json({ ok: true, changes: this.changes });
-        });
-      });
-    });
-  });
 });
 
-// ลบการจอง
-app.delete("/api/reservations/:id", (req, res) => {
-  // ตรวจสอบว่ามีการจองหรือไม่
-  db.get("SELECT * FROM reservations WHERE id = ?", [req.params.id], (err, reservation) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
+// Update reservation quantity
+app.put('/api/reservations/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { reserved_quantity } = req.body || {};
+    if (reserved_quantity === undefined || reserved_quantity <= 0) return res.status(400).json({ ok: false, error: 'reserved_quantity must be a positive number' });
+
+    const { data: reservation, error: rerr } = await supabase.from('reservations').select('*').eq('id', id).limit(1).maybeSingle();
+    if (rerr) throw rerr;
+    if (!reservation) return res.status(404).json({ ok: false, error: 'reservation not found' });
+    if (reservation.status !== 'pending') return res.status(400).json({ ok: false, error: 'can only update quantity for pending reservations' });
+
+    const { data: product, error: perr } = await supabase.from('products').select('*').eq('sku', reservation.product_sku).limit(1).maybeSingle();
+    if (perr) throw perr;
+    if (!product) return res.status(404).json({ ok: false, error: 'product not found' });
+
+    const availableQuantity = product.quantity + reservation.reserved_quantity;
+    if (reserved_quantity > availableQuantity) return res.status(400).json({ ok: false, error: 'insufficient stock', available: availableQuantity });
+
+    // update reservation
+    const { error: ures } = await supabase.from('reservations').update({ reserved_quantity, updated_at: new Date().toISOString() }).eq('id', id);
+    if (ures) throw ures;
+
+    // update product quantity accordingly
+    const newProductQty = product.quantity + reservation.reserved_quantity - reserved_quantity;
+    const { error: uprod } = await supabase.from('products').update({ quantity: newProductQty }).eq('sku', reservation.product_sku);
+    if (uprod) {
+      // attempt to revert reservation update
+      await supabase.from('reservations').update({ reserved_quantity: reservation.reserved_quantity }).eq('id', id);
+      throw uprod;
     }
-    if (!reservation) return res.status(404).json({ ok: false, error: "reservation not found" });
-    
-    // ถ้าการจองยังไม่ถูกยกเลิก ให้คืนสต๊อก
+
+    res.json({ ok: true, changes: 1 });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
+});
+
+// Delete reservation
+app.delete('/api/reservations/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { data: reservation, error: rerr } = await supabase.from('reservations').select('*').eq('id', id).limit(1).maybeSingle();
+    if (rerr) throw rerr;
+    if (!reservation) return res.status(404).json({ ok: false, error: 'reservation not found' });
+
     if (reservation.status !== 'cancelled') {
-      // คืนสต๊อกให้สินค้า
-      const updateProduct = db.prepare(`
-        UPDATE products 
-        SET quantity = quantity + ? 
-        WHERE sku = ?
-      `);
-      
-      updateProduct.run([reservation.reserved_quantity, reservation.product_sku], function(err) {
-        if (err) {
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        
-        // ลบการจอง
-        const stmt = db.prepare("DELETE FROM reservations WHERE id = ?");
-        
-        stmt.run([req.params.id], function(err) {
-          if (err) {
-            // ถ้าลบไม่สำเร็จ ให้ย้อนกลับการคืนสต๊อก
-            const revertProduct = db.prepare(`
-              UPDATE products 
-              SET quantity = quantity - ? 
-              WHERE sku = ?
-            `);
-            revertProduct.run([reservation.reserved_quantity, reservation.product_sku]);
-            return res.status(500).json({ ok: false, error: err.message });
-          }
-          
-          res.json({ ok: true, deleted: req.params.id });
-        });
-      });
-    } else {
-      // ลบการจอง
-      const stmt = db.prepare("DELETE FROM reservations WHERE id = ?");
-      
-      stmt.run([req.params.id], function(err) {
-        if (err) {
-          return res.status(500).json({ ok: false, error: err.message });
-        }
-        res.json({ ok: true, deleted: req.params.id });
-      });
-    }
-  });
-});
+      const { data: product, error: perr } = await supabase.from('products').select('*').eq('sku', reservation.product_sku).limit(1).maybeSingle();
+      if (perr) throw perr;
+      if (!product) return res.status(404).json({ ok: false, error: 'product not found' });
 
-// เพิ่มสินค้าหลายรายการ
-app.post("/api/products/bulk", (req, res) => {
-  const products = req.body || [];
-  
-  if (!Array.isArray(products) || products.length === 0) {
-    return res.status(400).json({ ok: false, error: "products must be a non-empty array" });
-  }
-  
-  // Begin transaction
-  db.serialize(() => {
-    db.run("BEGIN TRANSACTION");
-    
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO products (sku, name, category, price, quantity)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    
-    let successCount = 0;
-    let errorCount = 0;
-    
-    products.forEach((product) => {
-      const { sku, name, category, price, quantity } = product;
-      if (!sku) {
-        errorCount++;
-        return;
+      const { error: u1 } = await supabase.from('products').update({ quantity: product.quantity + reservation.reserved_quantity }).eq('sku', reservation.product_sku);
+      if (u1) throw u1;
+
+      const { error: d } = await supabase.from('reservations').delete().eq('id', id);
+      if (d) {
+        // attempt to revert product change
+        await supabase.from('products').update({ quantity: product.quantity }).eq('sku', reservation.product_sku);
+        throw d;
       }
-      
-      stmt.run([sku, name, category, price, quantity], function(err) {
-        if (err) {
-          console.error('Error inserting product:', err);
-          errorCount++;
-        } else {
-          successCount++;
-        }
-      });
-    });
-    
-    stmt.finalize(() => {
-      db.run("COMMIT", (err) => {
-        if (err) {
-          db.run("ROLLBACK");
-          return res.status(500).json({ ok: false, error: "Transaction failed" });
-        }
-        
-        res.json({ 
-          ok: true, 
-          successCount, 
-          errorCount,
-          message: `Imported ${successCount} products, ${errorCount} errors`
-        });
-      });
-    });
-  });
+
+      return res.json({ ok: true, deleted: id });
+    }
+
+    const { error: d2 } = await supabase.from('reservations').delete().eq('id', id);
+    if (d2) throw d2;
+    res.json({ ok: true, deleted: id });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
-// ====== Database Management API ======
+// Bulk import products (upsert)
+app.post('/api/products/bulk', async (req, res) => {
+  try {
+    const products = req.body || [];
+    if (!Array.isArray(products) || products.length === 0) return res.status(400).json({ ok: false, error: 'products must be a non-empty array' });
 
-// Create new database (clear and reinitialize)
-app.post("/api/database/create", (req, res) => {
-  // Drop existing tables
-  db.serialize(() => {
-    db.run("DROP TABLE IF EXISTS reservations");
-    db.run("DROP TABLE IF EXISTS products");
+    // Upsert by sku
+    const { data, error } = await supabase.from('products').upsert(products, { onConflict: 'sku' });
+    if (error) throw error;
+    res.json({ ok: true, successCount: data.length, errorCount: 0, message: `Imported ${data.length} products, 0 errors` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
+});
+
+// ====== Database Management API (adapted for Supabase) ======
+
+// Create (seed) database: simplified version for testing
+app.post('/api/database/create', async (req, res) => {
+  try {
+    // Try to insert sample data (tables should already exist)
+    const sample = [
+      { sku: 'BTH-0001', name: 'Single-Handle Basin Faucet', category: 'Faucet', price: 1290, quantity: 25 },
+      { sku: 'BTH-0002', name: 'Wall-Mounted Shower Set', category: 'Shower', price: 2590, quantity: 18 },
+      { sku: 'BTH-0003', name: 'One-Piece Toilet 4.8L', category: 'Toilet', price: 6490, quantity: 10 },
+      { sku: 'BTH-0004', name: 'Pedestal Basin 50cm', category: 'Basin', price: 1890, quantity: 14 }
+    ];
+
+    // Clear existing data first
+    try {
+      await supabase.from('reservations').delete().neq('id', 0);
+      await supabase.from('products').delete().neq('id', 0);
+    } catch (clearError) {
+      console.log('Warning: Could not clear existing data:', clearError.message);
+    }
+
+    // Insert sample data
+    const { error } = await supabase.from('products').insert(sample);
+    if (error) throw error;
     
-    // Recreate tables
-    db.run(`
-      CREATE TABLE products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sku TEXT UNIQUE,
-        name TEXT,
-        category TEXT,
-        price REAL,
-        quantity INTEGER
-      )
-    `);
+    res.json({ ok: true, message: 'Database seeded successfully with sample data' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
+});
+
+// New endpoint to create tables and seed with specific data
+app.post('/api/database/seed', async (req, res) => {
+  try {
+    // First, try to insert the sample data directly
+    const sample = [
+      { sku: 'BTH-0001', name: 'Single-Handle Basin Faucet', category: 'Faucet', price: 1290, quantity: 25 },
+      { sku: 'BTH-0002', name: 'Wall-Mounted Shower Set', category: 'Shower', price: 2590, quantity: 18 },
+      { sku: 'BTH-0003', name: 'One-Piece Toilet 4.8L', category: 'Toilet', price: 6490, quantity: 10 }
+    ];
+
+    // Clear existing data
+    await supabase.from('reservations').delete().neq('id', 0);
+    await supabase.from('products').delete().neq('id', 0);
+
+    // Insert new data
+    const { error } = await supabase.from('products').insert(sample);
+    if (error) throw error;
     
-    db.run(`
-      CREATE TABLE reservations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_sku TEXT,
-        customer_name TEXT,
-        reserved_quantity INTEGER,
-        status TEXT DEFAULT 'pending',
-        discount REAL DEFAULT 0,
-        vat REAL DEFAULT 0,
-        sales_person TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (product_sku) REFERENCES products (sku)
-      )
-    `);
-    
-    // Seed with sample data
-    const stmt = db.prepare(`
-      INSERT INTO products (sku, name, category, price, quantity)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    
-    stmt.run("BTH-0001", "Single-Handle Basin Faucet", "Faucet", 1290, 25);
-    stmt.run("BTH-0002", "Wall-Mounted Shower Set", "Shower", 2590, 18);
-    stmt.run("BTH-0003", "One-Piece Toilet 4.8L", "Toilet", 6490, 10);
-    stmt.run("BTH-0004", "Pedestal Basin 50cm", "Basin", 1890, 14);
-    stmt.finalize();
-    
-    res.json({ ok: true, message: "Database created and seeded successfully" });
-  });
+    res.json({ ok: true, message: 'Database seeded successfully with specific data' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
 // Delete database (clear all data)
-app.delete("/api/database/delete", (req, res) => {
-  // Clear all data from tables
-  db.serialize(() => {
-    db.run("DELETE FROM reservations");
-    db.run("DELETE FROM products");
-    
-    // Reset autoincrement counters
-    db.run("DELETE FROM sqlite_sequence WHERE name='products'");
-    db.run("DELETE FROM sqlite_sequence WHERE name='reservations'");
-    
-    res.json({ ok: true, message: "Database cleared successfully" });
-  });
+app.delete('/api/database/delete', async (req, res) => {
+  try {
+    await supabase.from('reservations').delete().neq('id', 0);
+    await supabase.from('products').delete().neq('id', 0);
+    res.json({ ok: true, message: 'Database cleared successfully' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || err });
+  }
 });
 
 const PORT = 3002;
 const server = app.listen(PORT, () => console.log(`API ready: http://localhost:${PORT}`));
-
-// ปิดการเชื่อมต่อฐานข้อมูลเมื่อเซิร์ฟเวอร์หยุดทำงาน
-process.on('SIGINT', () => {
-  console.log('\nShutting down server...');
-  db.close((err) => {
-    if (err) {
-      console.error('Error closing database:', err.message);
-    } else {
-      console.log('Database connection closed.');
-    }
-    server.close(() => {
-      console.log('Server closed.');
-      process.exit(0);
-    });
-  });
-});

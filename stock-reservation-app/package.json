@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "sqlite3": "^5.1.7",
+    "@supabase/supabase-js": "^2.26.0",
+    "dotenv": "^16.3.1",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "chart.js": "^4.4.3",

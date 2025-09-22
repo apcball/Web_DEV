@@ -54,6 +54,39 @@ This application is built with:
 - CSS for beautiful styling
 - xlsx library for Excel file parsing
 
+## Supabase (Production / Remote DB)
+
+This project can be run using Supabase (Postgres) instead of the built-in SQLite file. The server expects the following environment variables:
+
+- `SUPABASE_URL` — your Supabase project URL (e.g. https://xyz.supabase.co)
+- `SUPABASE_KEY` — service role key or anon key with appropriate permissions
+
+Copy `.env.example` to `.env` and fill the values before starting the API server.
+
+Required Supabase tables (simple schema):
+
+products
+- id: serial primary key
+- sku: text unique
+- name: text
+- category: text
+- price: numeric
+- quantity: integer
+
+reservations
+- id: serial primary key
+- product_sku: text (references products.sku)
+- customer_name: text
+- reserved_quantity: integer
+- status: text (pending, confirmed, cancelled, completed)
+- discount: numeric
+- vat: numeric
+- sales_person: text
+- created_at: timestamp with time zone (default now())
+- updated_at: timestamp with time zone (default now())
+
+The Express server (`server.cjs`) exposes the same REST endpoints as the local SQLite version, so the frontend (`App.jsx`) should work without code changes when `SUPABASE_URL` and `SUPABASE_KEY` are provided.
+
 ## Installation
 
 1. Install dependencies:
