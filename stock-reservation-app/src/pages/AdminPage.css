@@ -1698,6 +1698,16 @@
   font-size: 1.1rem;
 }
 
+.btn-success {
+  background: var(--success-gradient);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: var(--box-shadow-md);
+}
+
 .upload-area {
   margin-top: 30px;
   text-align: center;

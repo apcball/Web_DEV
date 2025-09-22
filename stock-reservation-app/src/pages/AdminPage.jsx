@@ -183,6 +183,35 @@ const AdminPage = ({
     }
   };
 
+  // Export stock data to CSV
+  const handleExportStock = async () => {
+    try {
+      const res = await fetch('http://localhost:3002/api/products/export');
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to export stock data');
+      }
+      
+      // Get the CSV data
+      const csvData = await res.text();
+      
+      // Create a blob and download link
+      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `stock_export_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      alert('Stock data exported successfully!');
+    } catch (e) {
+      alert('Error exporting stock data: ' + (e.message || e));
+    }
+  };
+
   // Handle logout
   const handleLogout = () => {
     setIsAuthenticated(false);
@@ -580,6 +609,7 @@ const AdminPage = ({
               <input type="file" accept=".xlsx" onChange={handleExcelUpload} />
             </div>
             <div className="database-actions">
+              <button className="btn btn-success" onClick={handleExportStock}>Export Stock (CSV)</button>
               <button className="btn btn-warning" onClick={handleCreateDatabase}>Create Database</button>
               <button className="btn btn-danger" onClick={handleDeleteDatabase}>Delete All Data</button>
             </div>
