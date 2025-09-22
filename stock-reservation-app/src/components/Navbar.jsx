@@ -7,13 +7,13 @@ const Navbar = ({ isAdminView, toggleAdminView, toggleStockView }) => {
         className={`nav-btn ${!isAdminView ? 'active' : ''}`}
         onClick={toggleStockView}
       >
-        Stock
+        Stock View
       </button>
       <button 
         className={`nav-btn ${isAdminView ? 'active' : ''}`}
         onClick={toggleAdminView}
       >
-        Admin Access
+        Admin Dashboard
       </button>
     </nav>
   );

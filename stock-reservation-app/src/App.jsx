@@ -159,7 +159,12 @@ function App() {
         }
 
         const data = await res.json();
-        created.push({ ...r, id: data.id, status: 'pending', date: new Date().toLocaleDateString(), productSku: payload.product_sku });
+        // Ensure we have a valid ID before proceeding
+        if (!data.id && !data.data) {
+          throw new Error('Invalid response from server - missing reservation ID');
+        }
+        const reservationId = data.id || (data.data && data.data[0] && data.data[0].id);
+        created.push({ ...r, id: reservationId, status: 'pending', date: new Date().toLocaleDateString(), productSku: payload.product_sku });
       }
 
       // refresh products and reservations from server to reflect updated stock
@@ -193,6 +198,7 @@ function App() {
       setReservations(reservationsMapped);
       setIsReservationModalOpen(false);
     } catch (e) {
+      console.error('Reservation error:', e);
       alert('Error creating reservation: ' + (e.message || e));
     }
   };
@@ -319,14 +325,14 @@ function App() {
           </div>
         </section>
 
-        {reservations.filter(res => res.status !== 'completed').length > 0 && (
+        {reservations.filter(res => res.status !== 'completed' && res.status !== 'cancelled').length > 0 && (
           <section className="section reservations-section">
             <h2 className="section-title">Your Reservations</h2>
             <div className="reservations-list">
               {(() => {
                 // Group reservations by customer name
                 const groupedReservations = {};
-                reservations.filter(res => res.status !== 'completed').forEach(reservation => {
+                reservations.filter(res => res.status !== 'completed' && res.status !== 'cancelled').forEach(reservation => {
                   if (!groupedReservations[reservation.customerName]) {
                     groupedReservations[reservation.customerName] = [];
                   }

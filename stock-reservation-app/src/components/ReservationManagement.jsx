@@ -14,9 +14,14 @@ const ReservationManagement = ({ reservations, stockData, onCancelReservation, o
 
   // Group reservations by customer name
   // group and optionally sort reservations per customer
+  // Only show pending reservations
+  const pendingReservations = reservations.filter(reservation => 
+    !reservation.status || reservation.status === 'pending'
+  );
+  
   const groupedReservations = useMemo(() => {
     const groups = {};
-    reservations.forEach(reservation => {
+    pendingReservations.forEach(reservation => {
       if (!groups[reservation.customerName]) groups[reservation.customerName] = [];
       groups[reservation.customerName].push(reservation);
     });
@@ -41,7 +46,7 @@ const ReservationManagement = ({ reservations, stockData, onCancelReservation, o
     }
 
     return groups;
-  }, [reservations, sortConfig]);
+  }, [pendingReservations, sortConfig]);
 
   // Handle quantity change
   const handleQuantityChange = (reservationId, newQuantity) => {
@@ -117,10 +122,10 @@ const ReservationManagement = ({ reservations, stockData, onCancelReservation, o
       <div className="admin-reservations-actions" style={{ marginBottom: 12 }}>
         <button className="btn btn-secondary" onClick={exportCsv}>Export Reservations (CSV)</button>
       </div>
-      {reservations.length === 0 ? (
+      {pendingReservations.length === 0 ? (
         <div className="no-reservations">
-          <h3>No reservations found</h3>
-          <p>There are currently no reservations to manage.</p>
+          <h3>No pending reservations found</h3>
+          <p>There are currently no pending reservations to manage.</p>
         </div>
       ) : (
         <div className="admin-reservations-grouped">

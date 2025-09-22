@@ -220,7 +220,20 @@ app.post('/api/reservations', async (req, res) => {
     const { data: inserted, error: ierr } = await supabase.from('reservations').insert([{ product_sku, customer_name, reserved_quantity, discount, vat, sales_person }]);
     if (ierr) throw ierr;
 
-    const reservationId = inserted[0].id;
+    // Get the ID of the inserted reservation by querying for it
+    const { data: latestReservation, error: queryError } = await supabase
+      .from('reservations')
+      .select('id')
+      .eq('product_sku', product_sku)
+      .eq('customer_name', customer_name)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (queryError) throw queryError;
+    if (!latestReservation) throw new Error('Failed to retrieve created reservation');
+    
+    const reservationId = latestReservation.id;
 
     // update product quantity (best-effort)
     const { error: uerr } = await supabase.from('products').update({ quantity: product.quantity - reserved_quantity }).eq('sku', product_sku);

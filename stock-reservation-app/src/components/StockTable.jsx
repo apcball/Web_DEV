@@ -6,10 +6,10 @@ const StockTable = ({ stockData, onReserve }) => {
 
   // Function to determine stock level indicator
   const getStockLevelIndicator = (quantity) => {
-    if (quantity === 0) return { level: 'out', color: '#e53e3e' };
-    if (quantity < 10) return { level: 'low', color: '#dd6b20' };
-    if (quantity < 25) return { level: 'medium', color: '#d69e2e' };
-    return { level: 'high', color: '#38a169' };
+    if (quantity === 0) return { level: 'out of stock', color: '#ef4444' };
+    if (quantity < 10) return { level: 'low stock', color: '#f59e0b' };
+    if (quantity < 25) return { level: 'medium stock', color: '#3b82f6' };
+    return { level: 'in stock', color: '#10b981' };
   };
 
   // Pagination logic
@@ -71,7 +71,7 @@ const StockTable = ({ stockData, onReserve }) => {
             <th>Total</th>
             <th>Reserved</th>
             <th>Available</th>
-            <th>Stock</th>
+            <th>Stock Status</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -85,11 +85,11 @@ const StockTable = ({ stockData, onReserve }) => {
                 <td data-label="Category">
                   <span className="category-tag">{item.category}</span>
                 </td>
-                <td data-label="Price">฿{item.price}</td>
+                <td data-label="Price">฿{item.price.toFixed(2)}</td>
                 <td data-label="Total">{item.quantity}</td>
                 <td data-label="Reserved">{item.reservedQuantity}</td>
                 <td data-label="Available">{item.availableQuantity}</td>
-                <td data-label="Stock">
+                <td data-label="Stock Status">
                   <div className="stock-level" style={{ color: stockIndicator.color }}>
                     <span className="stock-dot" style={{ backgroundColor: stockIndicator.color }}></span>
                     {stockIndicator.level}
@@ -109,6 +109,31 @@ const StockTable = ({ stockData, onReserve }) => {
           })}
         </tbody>
       </table>
+      
+      {/* Pagination Controls - Bottom */}
+      {totalPages > 1 && (
+        <div className="pagination-controls">
+          <button 
+            className="pagination-btn"
+            onClick={handlePrevPage}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </button>
+          
+          <span className="pagination-info">
+            Page {currentPage} of {totalPages} (Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, stockData.length)} of {stockData.length} products)
+          </span>
+          
+          <button 
+            className="pagination-btn"
+            onClick={handleNextPage}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 };

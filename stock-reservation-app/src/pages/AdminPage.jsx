@@ -13,7 +13,8 @@ const AdminPage = ({
   setStockData,
   reservations,
   setReservations,
-  onBack
+  onBack,
+  onLogin
 }) => {
   const [adminPassword, setAdminPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -52,6 +53,7 @@ const AdminPage = ({
         if (storedIsAuthenticated && (now - timestamp < oneWeek)) {
           setIsAuthenticated(true);
           setShowAuthForm(false);
+          if (onLogin) onLogin(true);
         } else {
           // Clear expired authentication
           localStorage.removeItem('adminAuth');
@@ -61,7 +63,7 @@ const AdminPage = ({
         localStorage.removeItem('adminAuth');
       }
     }
-  }, []);
+  }, [onLogin]);
 
   // Update suggestions when search term changes
   useEffect(() => {
@@ -90,6 +92,7 @@ const AdminPage = ({
     if (adminPassword === 'admin123') {
       setIsAuthenticated(true);
       setShowAuthForm(false);
+      if (onLogin) onLogin(true);
       
       // Store authentication state if "Remember Me" is checked
       if (rememberMe) {
@@ -189,6 +192,9 @@ const AdminPage = ({
     
     // Clear stored authentication
     localStorage.removeItem('adminAuth');
+    
+    // Notify parent component
+    if (onLogin) onLogin(false);
   };
 
   // Excel file upload handler
@@ -478,6 +484,24 @@ const AdminPage = ({
     })();
   };
 
+  // If not authenticated, show nothing or a login prompt
+  if (!isAuthenticated && !showAuthForm) {
+    return (
+      <div className="admin-page">
+        <div className="admin-auth-required">
+          <h2>Admin Access Required</h2>
+          <p>You must be logged in as an administrator to view this page.</p>
+          <button className="btn btn-primary" onClick={() => setShowAuthForm(true)}>
+            Login as Admin
+          </button>
+          <button className="btn btn-outline" onClick={onBack}>
+            Back to Stock View
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="admin-page">
       <header className="admin-header">
@@ -486,7 +510,7 @@ const AdminPage = ({
           <button onClick={() => setActiveTab('stock')} className={activeTab === 'stock' ? 'active' : ''}>Stock Management</button>
           <button onClick={() => setActiveTab('reservations')} className={activeTab === 'reservations' ? 'active' : ''}>Reservation Management</button>
           <button onClick={handleLogout}>Logout</button>
-          <button onClick={onBack}>Back</button>
+          <button onClick={onBack}>Back to Stock View</button>
         </div>
       </header>
 
@@ -495,41 +519,51 @@ const AdminPage = ({
           <div className="admin-auth-overlay">
             <form className="admin-auth-form" onSubmit={handleLogin}>
               <h2>Admin Login</h2>
-              <input
-                type="password"
-                placeholder="Enter admin password"
-                value={adminPassword}
-                onChange={(e) => setAdminPassword(e.target.value)}
-              />
-              <label>
+              <div className="form-group">
+                <label htmlFor="adminPassword">Password</label>
+                <input
+                  type="password"
+                  id="adminPassword"
+                  placeholder="Enter admin password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                />
+              </div>
+              <label className="remember-me">
                 <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} /> Remember me
               </label>
               <div className="auth-actions">
-                <button type="submit">Login</button>
-                <button type="button" onClick={() => { setShowAuthForm(false); setAdminPassword(''); }}>Close</button>
+                <button type="submit" className="btn btn-primary">Login</button>
+                <button type="button" className="btn btn-outline" onClick={() => { setShowAuthForm(false); setAdminPassword(''); onBack(); }}>
+                  Close
+                </button>
               </div>
             </form>
           </div>
         )}
-        {activeTab === 'stock' && (
+        {isAuthenticated && activeTab === 'stock' && (
           <section className="admin-section">
             <h2>Stock Management</h2>
             <AdminStockTable stockData={stockData} onDeductStock={handleDeductStock} />
             <div className="replenish-quick-form">
               <h3>Quick Replenish</h3>
               <div className="replenish-form-row">
-                <input
-                  type="text"
-                  placeholder="Search product..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                <div className="suggestions-list">
-                  {suggestions.slice(0,5).map(s => (
-                    <div key={s.sku} className="suggestion-item" onClick={() => handleSelectProduct(s)}>
-                      {s.name} ({s.sku})
+                <div className="search-container">
+                  <input
+                    type="text"
+                    placeholder="Search product..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  {suggestions.length > 0 && (
+                    <div className="suggestions-list">
+                      {suggestions.slice(0,5).map(s => (
+                        <div key={s.sku} className="suggestion-item" onClick={() => handleSelectProduct(s)}>
+                          {s.name} ({s.sku})
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
                 <input
                   type="number"
@@ -538,7 +572,7 @@ const AdminPage = ({
                   value={replenishQuantity}
                   onChange={(e) => setReplenishQuantity(e.target.value)}
                 />
-                <button onClick={handleReplenishStock}>Replenish</button>
+                <button className="btn btn-primary" onClick={handleReplenishStock}>Replenish</button>
               </div>
             </div>
             <div className="upload-area">
@@ -546,13 +580,13 @@ const AdminPage = ({
               <input type="file" accept=".xlsx" onChange={handleExcelUpload} />
             </div>
             <div className="database-actions">
-              <button onClick={handleCreateDatabase}>Create Database</button>
-              <button onClick={handleDeleteDatabase}>Delete All Data</button>
+              <button className="btn btn-warning" onClick={handleCreateDatabase}>Create Database</button>
+              <button className="btn btn-danger" onClick={handleDeleteDatabase}>Delete All Data</button>
             </div>
           </section>
         )}
 
-        {activeTab === 'reservations' && (
+        {isAuthenticated && activeTab === 'reservations' && (
           <div className="tab-content reservations-tab">
             <div>
               <section className="admin-section">
