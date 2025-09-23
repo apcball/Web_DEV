@@ -776,28 +776,58 @@
     flex-direction: column;
     gap: 15px;
     text-align: center;
+    padding: 20px 15px;
   }
   
   .admin-header h1 {
     font-size: 1.8rem;
   }
   
-  .admin-nav {
-    flex-direction: column;
+  .admin-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
   }
   
-  .nav-tab {
-    width: 100%;
-    text-align: center;
+  .admin-actions button {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px 15px;
+    font-size: 0.9rem;
+  }
+  
+  .admin-main {
+    padding: 20px 15px;
+  }
+  
+  .admin-section {
+    padding: 20px 15px;
+  }
+  
+  .admin-section h2 {
+    font-size: 1.6rem;
+    padding-bottom: 12px;
+    margin-bottom: 20px;
   }
   
   .summary-cards {
     grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .summary-card {
+    padding: 20px;
+  }
+  
+  .summary-card .summary-value {
+    font-size: 2.2rem;
   }
   
   .admin-search-filters {
     flex-direction: column;
     align-items: stretch;
+    padding: 15px;
+    gap: 15px;
   }
   
   .admin-search-box, .admin-filter-box {
@@ -847,6 +877,109 @@
     font-size: 0.75rem;
     padding: 4px 8px;
   }
+  
+  /* Mobile Admin Table */
+  .admin-stock-table-container, .admin-reservations-table-container {
+    overflow-x: auto;
+  }
+  
+  .admin-stock-table, .admin-reservations-table {
+    min-width: 100%;
+  }
+  
+  .admin-stock-table, .admin-stock-table thead, .admin-stock-table tbody, 
+  .admin-stock-table th, .admin-stock-table td, .admin-stock-table tr,
+  .admin-reservations-table, .admin-reservations-table thead, .admin-reservations-table tbody, 
+  .admin-reservations-table th, .admin-reservations-table td, .admin-reservations-table tr {
+    display: block;
+  }
+  
+  .admin-stock-table thead tr, .admin-reservations-table thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+  
+  .admin-stock-table tr, .admin-reservations-table tr {
+    border: 1px solid var(--border-color);
+    margin-bottom: 15px;
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--box-shadow-sm);
+    padding: 10px;
+  }
+  
+  .admin-stock-table td, .admin-reservations-table td {
+    border: none;
+    position: relative;
+    padding: 12px 12px 12px 45%;
+    text-align: right;
+  }
+  
+  .admin-stock-table td:before, .admin-reservations-table td:before {
+    content: attr(data-label) ": ";
+    position: absolute;
+    left: 12px;
+    width: 40%;
+    padding-right: 10px;
+    white-space: nowrap;
+    font-weight: 600;
+    color: var(--dark-bg);
+    text-align: left;
+  }
+  
+  .admin-stock-table tr:hover td, .admin-reservations-table tr:hover td {
+    background-color: #f8f9ff;
+  }
+  
+  .admin-stock-table tr:hover td:first-child, .admin-reservations-table tr:hover td:first-child {
+    border-left: none;
+  }
+  
+  .quantity-input {
+    width: 100%;
+    margin-bottom: 10px;
+    min-width: 100px;
+  }
+  
+  .action-btn {
+    width: 100%;
+    margin: 5px 0;
+    padding: 10px;
+  }
+  
+  .replenish-form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .replenish-form-row input[type="text"],
+  .replenish-form-row input[type="number"] {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  
+  .replenish-form-row button {
+    width: 100%;
+    padding: 12px;
+  }
+  
+  .database-actions {
+    flex-direction: column;
+  }
+  
+  .database-actions button {
+    min-width: auto;
+    margin-bottom: 10px;
+  }
+  
+  .admin-instructions ul {
+    padding-left: 15px;
+  }
+  
+  .admin-instructions li {
+    font-size: 1rem;
+    padding: 8px 0;
+  }
 }
 
 @media (max-width: 480px) {
@@ -873,6 +1006,44 @@
   .admin-stock-table, .admin-reservations-table {
     display: block;
     overflow-x: auto;
+  }
+  
+  .admin-actions button {
+    font-size: 0.85rem;
+    padding: 10px 12px;
+  }
+  
+  .nav-tab {
+    padding: 12px 15px;
+    font-size: 0.9rem;
+  }
+  
+  .category-tag {
+    font-size: 0.8rem;
+    padding: 5px 10px;
+  }
+  
+  .status-badge {
+    font-size: 0.7rem;
+    padding: 3px 6px;
+  }
+  
+  .admin-instructions h3 {
+    font-size: 1.3rem;
+  }
+  
+  .admin-instructions li {
+    font-size: 0.95rem;
+  }
+  
+  .form-group input {
+    padding: 12px;
+    font-size: 1rem;
+  }
+  
+  .btn {
+    padding: 10px;
+    font-size: 0.9rem;
   }
 }
 

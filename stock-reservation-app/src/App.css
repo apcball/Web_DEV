@@ -1595,8 +1595,18 @@ body {
     min-width: 100%;
   }
   
+  .search-input, .filter-select {
+    width: 100%;
+    box-sizing: border-box;
+    word-break: break-word;
+  }
+  
   .stock-table-wrapper {
     border-radius: var(--border-radius-md);
+    overflow-x: auto;
+    margin-top: 20px;
+    box-shadow: var(--box-shadow-sm);
+    border: 1px solid var(--border-color);
   }
   
   .reservations-list {
@@ -1619,6 +1629,132 @@ body {
     font-size: 0.9rem;
     flex: 1;
     min-width: 120px;
+  }
+  
+  /* Mobile Stock Table */
+  .stock-table-wrapper {
+    overflow-x: auto;
+  }
+  
+  .stock-table {
+    min-width: 100%;
+  }
+  
+  .stock-table, .stock-table thead, .stock-table tbody, 
+  .stock-table th, .stock-table td, .stock-table tr {
+    display: block;
+  }
+  
+  .stock-table thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+  
+  .stock-table tr {
+    border: 1px solid var(--border-color);
+    margin-bottom: 15px;
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--box-shadow-sm);
+    padding: 15px;
+    position: relative;
+  }
+  
+  .stock-table td {
+    border: none;
+    position: relative;
+    padding: 12px 12px 12px 45%;
+    text-align: right;
+    border-bottom: 1px solid var(--border-color);
+    word-wrap: break-word;
+    min-height: 40px;
+  }
+  
+  .stock-table td:before {
+    content: attr(data-label) ": ";
+    position: absolute;
+    left: 12px;
+    width: 40%;
+    padding-right: 10px;
+    white-space: nowrap;
+    font-weight: 600;
+    color: var(--dark-bg);
+    text-align: left;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  
+  .stock-table td:last-child {
+    border-bottom: none;
+  }
+  
+  .stock-table tr:hover td {
+    background-color: #f8f9ff;
+  }
+  
+  .stock-table tr:hover td:first-child {
+    border-left: none;
+  }
+  
+  /* Mobile Category Tag */
+  .category-tag {
+    display: inline-block;
+    margin-top: 5px;
+  }
+  
+  /* Mobile Stock Level */
+  .stock-level {
+    justify-content: flex-end;
+  }
+  
+  /* Mobile Reserve Button */
+  .reserve-btn {
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px;
+    justify-content: center;
+  }
+  
+  /* Mobile Reservation Card */
+  .reservation-card {
+    padding: 15px;
+  }
+  
+  .reservation-products ul {
+    padding-left: 15px;
+    word-break: break-word;
+  }
+  
+  .reservation-products li {
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+    word-break: break-word;
+  }
+  
+  .reservation-summary {
+    padding-top: 10px;
+  }
+  
+  .reservation-summary p {
+    font-size: 1rem;
+    margin: 5px 0;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  
+  .reservation-summary span:first-child {
+    font-weight: 500;
+    color: var(--dark-bg);
+    flex: 1;
+    min-width: 120px;
+  }
+  
+  .reservation-summary .summary-value {
+    font-weight: 700;
+    flex: 1;
+    text-align: right;
+    word-break: break-word;
   }
 }
 
@@ -1665,8 +1801,8 @@ body {
   }
   
   .reserve-btn {
-    padding: 8px 12px;
-    font-size: 0.85rem;
+    padding: 10px;
+    font-size: 0.9rem;
   }
   
   .pagination-controls {
@@ -1683,6 +1819,82 @@ body {
   .pagination-info {
     text-align: center;
     font-size: 0.85rem;
+  }
+  
+  /* Mobile Reservation Modal */
+  .modal-content {
+    margin: 10px;
+    max-height: calc(100vh - 20px);
+  }
+  
+  .modal-header {
+    padding: 20px 15px;
+  }
+  
+  .modal-header h2 {
+    font-size: 1.5rem;
+  }
+  
+  .modal-body {
+    padding: 20px 15px;
+  }
+  
+  .modal-footer {
+    padding: 20px 15px;
+    flex-direction: column;
+  }
+  
+  .modal-footer .btn {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  
+  .form-section {
+    margin-bottom: 20px;
+  }
+  
+  .form-section h3 {
+    font-size: 1.3rem;
+    padding-bottom: 10px;
+  }
+  
+  .form-group {
+    margin-bottom: 15px;
+  }
+  
+  .form-group input, .form-group select, .form-group textarea {
+    padding: 12px 15px;
+  }
+  
+  .search-input {
+    padding: 12px 15px 12px 40px;
+    background-position: 12px center;
+    background-size: 16px;
+  }
+  
+  .summary-box {
+    padding: 20px 15px;
+  }
+  
+  .summary-row {
+    font-size: 1rem;
+    margin-bottom: 10px;
+  }
+  
+  .summary-value {
+    font-size: 1.1rem;
+  }
+  
+  .selected-products {
+    padding: 15px;
+  }
+  
+  .selected-products h4 {
+    font-size: 1.1rem;
+  }
+  
+  .selected-products ul {
+    padding-left: 15px;
   }
 }
 
@@ -1701,6 +1913,35 @@ body {
   
   .stock-table td {
     padding: 12px 10px;
+  }
+  
+  .category-tag {
+    font-size: 0.8rem;
+    padding: 5px 10px;
+  }
+  
+  .stock-level {
+    font-size: 0.9rem;
+  }
+  
+  .stock-dot {
+    width: 10px;
+    height: 10px;
+  }
+  
+  /* Enhanced Mobile Form Elements */
+  .form-group input, .form-group select, .form-group textarea {
+    padding: 12px;
+    font-size: 1rem;
+  }
+  
+  .form-actions {
+    flex-direction: column;
+  }
+  
+  .form-actions .btn {
+    width: 100%;
+    margin-bottom: 10px;
   }
 }
 
